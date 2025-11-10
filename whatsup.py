@@ -1,456 +1,673 @@
-# import tkinter as tk
-# from tkinter import ttk, messagebox
-# import pandas as pd
-# import os
+"""
+device_combined_bulk.py
 
-# CSV_FOLDER = "C:\\WhatsUpCSVs"       # your csv folder
-# RELATION_FILE = "C:\\Users\\Ammar\\Desktop\\relations.csv"  # relation file path
+Adds Bulk Insert / Bulk Update / Bulk Delete from an Excel file to the previous
+Device-combined manager.
 
+Features added in this file compared to prior version:
+- Buttons: Bulk Insert, Bulk Update, Bulk Delete. They accept an Excel file.
+- Column mapping rules:
+    * Columns named like "Table.Column" (e.g. "Device.sName" or "ChildTable.sVal")
+      are mapped to the named table/column.
+    * Columns not containing a dot are mapped to Device table columns.
+- Bulk Insert:
+    * For each Excel row, creates a Device row and child rows (based on columns or
+      default child-row templates). Missing parameters are taken from user defaults
+      (then detected defaults), otherwise left empty.
+    * After insertion, writes device and child CSVs.
+- Bulk Update:
+    * For each Excel row, locates the Device by primary key (first column of Device CSV);
+      updates only the specified columns that differ (doesn't remove or replace other rows).
+    * For child tables: supports updates if Excel columns use Table.Column and include
+      the child's PK column to identify the row.
+- Bulk Delete:
+    * Excel file must contain the Device primary key column (or column named like it).
+      Each listed PK will be removed from Device CSV and corresponding child rows
+      referencing the device will be removed too (simple cascade by FK match).
+- Default child-row templates: persists to DEFAULT_CHILD_ROWS_FILE. Templates are
+  applied during Insert (both single insert and bulk insert).
+- Visibility dialog now has table-level visibility toggles (show/hide entire table)
 
-# class CsvDashboard:
-#     def __init__(self, root):
-#         self.root = root
-#         self.root.title("WhatsUp Gold CSV Manager (Relation-Aware)")
-#         self.root.geometry("1200x700")
+Usage: edit DATA_FOLDER, RELATION_FILE paths at top; run with Python 3 and pandas.
+Make a backup of your CSV folder before using bulk operations.
 
-#         # Frames
-#         self.frame_left = tk.Frame(root, width=200, bg="#f0f0f0")
-#         self.frame_left.pack(side="left", fill="y")
+Requires: pandas
+"""
 
-#         self.frame_main = tk.Frame(root)
-#         self.frame_main.pack(side="right", fill="both", expand=True)
-
-#         self.frame_top = tk.Frame(self.frame_main)
-#         self.frame_top.pack(side="top", fill="x")
-
-#         self.frame_table = tk.Frame(self.frame_main)
-#         self.frame_table.pack(fill="both", expand=True)
-
-#         # Left: table list
-#         tk.Label(self.frame_left, text="Tables", bg="#d0d0d0", font=("Segoe UI", 10, "bold")).pack(fill="x")
-#         self.listbox = tk.Listbox(self.frame_left)
-#         self.listbox.pack(fill="both", expand=True, padx=5, pady=5)
-#         self.listbox.bind("<<ListboxSelect>>", self.load_table)
-
-#         # Buttons
-#         ttk.Button(self.frame_top, text="Add Row", command=self.add_row).pack(side="left", padx=5, pady=5)
-#         ttk.Button(self.frame_top, text="Edit Row", command=self.edit_row).pack(side="left", padx=5)
-#         ttk.Button(self.frame_top, text="Delete Row", command=self.delete_row).pack(side="left", padx=5)
-#         ttk.Button(self.frame_top, text="Save CSV", command=self.save_csv).pack(side="left", padx=5)
-#         ttk.Button(self.frame_top, text="Sync to SQL", command=self.sync_to_sql).pack(side="left", padx=5)
-
-#         # Status
-#         self.status = tk.Label(root, text="Ready", anchor="w", bg="#e8e8e8")
-#         self.status.pack(side="bottom", fill="x")
-
-#         # Table view
-#         self.tree = ttk.Treeview(self.frame_table)
-#         self.tree.pack(fill="both", expand=True)
-#         self.tree.bind("<Double-1>", lambda e: self.edit_row())
-
-#         # Load data
-#         self.load_csv_list()
-#         self.load_relations()
-
-#     def load_csv_list(self):
-#         self.csv_files = [f for f in os.listdir(CSV_FOLDER) if f.endswith(".csv")]
-#         self.listbox.delete(0, tk.END)
-#         for f in self.csv_files:
-#             self.listbox.insert(tk.END, f.replace(".csv", ""))
-
-#     def load_relations(self):
-#         """Load the schema relations file with flexible header names."""
-#         if not os.path.exists(RELATION_FILE):
-#             self.relations = pd.DataFrame(columns=["ForeignKeyName","ParentTable","ParentColumn","ReferencedTable","ReferencedColumn"])
-#             return
-#         df = pd.read_csv(RELATION_FILE)
-
-#         # Normalize column names to handle upper/lower case or underscores
-#         df.columns = [c.strip().lower() for c in df.columns]
-
-#         # Map any similar names to expected ones
-#         mapping = {
-#             "tablename": "TableName",
-#             "table_name": "TableName",
-#             "columnname": "ColumnName",
-#             "column_name": "ColumnName",
-#             "referencestable": "ReferencesTable",
-#             "referenced_table_name": "ReferencesTable",
-#             "referencestable": "ReferencesTable",
-#             "referencescolumn": "ReferencesColumn",
-#             "referenced_column_name": "ReferencesColumn"
-#         }
-
-#         # Rebuild dataframe with normalized keys
-#         renamed = {}
-#         for c in df.columns:
-#             key = mapping.get(c.lower())
-#             if key:
-#                 renamed[c] = key
-#         df.rename(columns=renamed, inplace=True)
-
-#         # Store
-#         self.relations = df
-
-#     def get_related_fields(self, table):
-#         """Return all foreign key relations for a given table."""
-#         if self.relations.empty:
-#             return []
-#         colname = [c for c in self.relations.columns if c.lower() in ["tablename", "table_name"]][0]
-#         rels = self.relations[self.relations[colname].astype(str).str.lower() == table.lower()]
-#         return rels.to_dict("records")
-
-#     def load_relations(self):
-#         """Load the schema relations file."""
-#         if not os.path.exists(RELATION_FILE):
-#             self.relations = pd.DataFrame(columns=["ForeignKeyName","ParentTable","ParentColumn","ReferencedTable","ReferencedColumn"])
-#             return
-#         self.relations = pd.read_csv(RELATION_FILE)
-
-#     def load_table(self, event=None):
-#         selection = self.listbox.curselection()
-#         if not selection:
-#             return
-#         table_name = self.listbox.get(selection[0])
-#         file_path = os.path.join(CSV_FOLDER, f"{table_name}.csv")
-#         self.df = pd.read_csv(file_path)
-#         self.display_table(self.df)
-#         self.current_table = table_name
-#         self.status.config(text=f"Loaded {table_name}")
-
-#     def display_table(self, df):
-#         self.tree.delete(*self.tree.get_children())
-#         self.tree["columns"] = list(df.columns)
-#         self.tree["show"] = "headings"
-#         for col in df.columns:
-#             self.tree.heading(col, text=col)
-#             self.tree.column(col, width=120, anchor="center")
-#         for _, row in df.iterrows():
-#             self.tree.insert("", "end", values=list(row))
-
-#     def get_related_fields(self, table):
-#         rels = self.relations[self.relations["TableName"] == table]
-#         return rels.to_dict("records")
-
-#     def add_row(self):
-#         if not hasattr(self, "df"):
-#             return
-#         self.open_row_editor("Add")
-
-#     def edit_row(self):
-#         if not hasattr(self, "df"):
-#             return
-#         selected = self.tree.selection()
-#         if not selected:
-#             messagebox.showinfo("Info", "Please select a row.")
-#             return
-#         values = self.tree.item(selected[0], "values")
-#         self.open_row_editor("Edit", values)
-
-#     def delete_row(self):
-#         selected = self.tree.selection()
-#         if not selected:
-#             return
-#         idx = self.tree.index(selected[0])
-#         self.df.drop(self.df.index[idx], inplace=True)
-#         self.display_table(self.df)
-#         self.status.config(text="Row deleted.")
-
-#     def save_csv(self):
-#         file_path = os.path.join(CSV_FOLDER, f"{self.current_table}.csv")
-#         self.df.to_csv(file_path, index=False)
-#         self.status.config(text=f"Saved {self.current_table}.csv")
-
-#     def open_row_editor(self, mode, values=None):
-#         win = tk.Toplevel(self.root)
-#         win.title(f"{mode} Row - {self.current_table}")
-#         entries = {}
-#         relations = self.get_related_fields(self.current_table)
-
-#         for i, col in enumerate(self.df.columns):
-#             tk.Label(win, text=col).grid(row=i, column=0, padx=5, pady=3)
-
-#             # Check if this field has a relation
-#             rel = next((r for r in relations if r["ColumnName"] == col), None)
-#             if rel:
-#                 # Load referenced values
-#                 ref_table = rel["ReferencesTable"]
-#                 ref_col = rel["ReferencesColumn"]
-#                 ref_path = os.path.join(CSV_FOLDER, f"{ref_table}.csv")
-#                 if os.path.exists(ref_path):
-#                     ref_df = pd.read_csv(ref_path)
-#                     options = list(ref_df[ref_col].astype(str).unique())
-#                 else:
-#                     options = []
-#                 combo = ttk.Combobox(win, values=options, state="readonly")
-#                 if values:
-#                     combo.set(str(values[i]))
-#                 combo.grid(row=i, column=1, padx=5, pady=3)
-#                 entries[col] = combo
-
-#                 # Button to open related table
-#                 ttk.Button(win, text=f"View {ref_table}", command=lambda t=ref_table: self.show_related_table(t)).grid(row=i, column=2, padx=3)
-#             else:
-#                 e = tk.Entry(win)
-#                 e.insert(0, values[i] if values else "")
-#                 e.grid(row=i, column=1, padx=5, pady=3)
-#                 entries[col] = e
-
-#         def save_changes():
-#             new_data = {c: entries[c].get() for c in self.df.columns}
-#             if mode == "Add":
-#                 self.df = pd.concat([self.df, pd.DataFrame([new_data])], ignore_index=True)
-#             else:
-#                 selected = self.tree.selection()
-#                 if selected:
-#                     idx = self.tree.index(selected[0])
-#                     for c in self.df.columns:
-#                         self.df.at[idx, c] = new_data[c]
-#             self.display_table(self.df)
-#             win.destroy()
-#             self.status.config(text=f"Row {mode.lower()}ed successfully.")
-
-#         ttk.Button(win, text="Save", command=save_changes).grid(columnspan=3, pady=10)
-
-#     def show_related_table(self, table_name):
-#         """Popup to show related table data."""
-#         ref_path = os.path.join(CSV_FOLDER, f"{table_name}.csv")
-#         if not os.path.exists(ref_path):
-#             messagebox.showerror("Error", f"{table_name}.csv not found.")
-#             return
-#         df = pd.read_csv(ref_path)
-
-#         top = tk.Toplevel(self.root)
-#         top.title(f"Related Table: {table_name}")
-#         tree = ttk.Treeview(top)
-#         tree.pack(fill="both", expand=True)
-#         tree["columns"] = list(df.columns)
-#         tree["show"] = "headings"
-#         for col in df.columns:
-#             tree.heading(col, text=col)
-#             tree.column(col, width=100)
-#         for _, row in df.iterrows():
-#             tree.insert("", "end", values=list(row))
-
-#     def sync_to_sql(self):
-#         messagebox.showinfo("Sync", "This will call your PowerShell script later.")
-
-
-# if __name__ == "__main__":
-#     root = tk.Tk()
-#     app = CsvDashboard(root)
-#     root.mainloop()
+import os, re, json, tempfile, shutil
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import pandas as pd
-import os
+from collections import defaultdict
 
-DATA_FOLDER = "C:\\WhatsUpCSVs"       # your csv folder
-RELATION_FILE = "C:\\Users\\Ammar\\Desktop\\relations.csv"  # relation file path
+# ---------------- CONFIG ----------------
+DATA_FOLDER = r"C:\WhatsUpCSVs"
+RELATION_FILE = r"C:\Users\Ammar\Desktop\relations.csv"
+DEFAULTS_FILE = os.path.join(os.path.expanduser("~"), "device_defaults.json")
+VISIBILITY_FILE = os.path.join(os.path.expanduser("~"), "device_visibility.json")
+DEFAULT_CHILD_ROWS_FILE = os.path.join(os.path.expanduser("~"), "device_default_child_rows.json")
+ROOT_TABLE = "Device"
+# ----------------------------------------
 
-class DatabaseViewer(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("CSV Database Manager (with Relations)")
-        self.geometry("1200x700")
+# ----- small helpers -----
+def normalize_table_name(name: str) -> str:
+    if not isinstance(name, str): return name
+    return re.sub(r"(?i)^dbo[_\.]", "", name.strip())
 
+
+def human_label(c: str) -> str:
+    s = re.sub(r"^[ns](_|-)?", "", c)
+    s = s.replace("_", " ").replace(".", " ")
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", s)
+    s = re.sub(r"\bID\b", "Id", s, flags=re.IGNORECASE)
+    return " ".join([w.capitalize() for w in s.split()])
+
+
+def safe_write_csv(df, path):
+    df2 = df.fillna("").astype(object)
+    dirn = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=dirn, prefix=".tmp_csv_")
+    os.close(fd)
+    try:
+        df2.to_csv(tmp, index=False, encoding="utf-8-sig", na_rep="")
+        shutil.move(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try: os.remove(tmp)
+            except: pass
+
+# ----- Tooling (Tooltips) -----
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget; self.text = text; self.top = None
+        widget.bind("<Enter>", self.show); widget.bind("<Leave>", self.hide)
+    def show(self, e=None):
+        if self.top: return
+        x = self.widget.winfo_rootx() + 12
+        y = self.widget.winfo_rooty() + 12
+        self.top = tk.Toplevel(self.widget); self.top.wm_overrideredirect(True)
+        self.top.wm_geometry(f"+{x}+{y}")
+        lbl = tk.Label(self.top, text=self.text, background="#ffffe0", relief="solid", borderwidth=1, padx=6, pady=3, wraplength=320)
+        lbl.pack()
+    def hide(self, e=None):
+        if self.top:
+            try: self.top.destroy()
+            except: pass
+            self.top = None
+
+# ----- Schema -----
+class DeviceSchema:
+    def __init__(self, data_folder, relation_file, root_table="Device"):
+        self.data_folder = data_folder
+        self.relation_file = relation_file
+        self.root_table = root_table
+        self.relations = None
+        self.child_map = defaultdict(list)
         self.tables = {}
-        self.current_table = None
-        self.current_df = None
+        self._load_relations()
+        self._load_device_and_children()
 
-        # Layout
-        self.setup_ui()
-
-        # Load data
-        self.load_relations()
-        self.load_tables()
-
-    def setup_ui(self):
-        # Sidebar
-        sidebar = tk.Frame(self, bg="#f3f3f3", width=200)
-        sidebar.pack(side=tk.LEFT, fill=tk.Y)
-
-        tk.Label(sidebar, text="Tables", bg="#f3f3f3", font=("Segoe UI", 10, "bold")).pack(pady=10)
-        self.table_listbox = tk.Listbox(sidebar)
-        self.table_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        self.table_listbox.bind("<<ListboxSelect>>", self.load_table_data)
-
-        tk.Button(sidebar, text="Save Changes", command=self.save_changes, bg="#d4edda").pack(pady=5, fill=tk.X)
-        tk.Button(sidebar, text="Reload Data", command=self.reload_data, bg="#ffeeba").pack(pady=5, fill=tk.X)
-
-        # Main display
-        self.frame_main = tk.Frame(self)
-        self.frame_main.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
-        self.label_table = tk.Label(self.frame_main, text="", font=("Segoe UI", 11, "bold"))
-        self.label_table.pack(pady=10)
-
-        self.tree = ttk.Treeview(self.frame_main, show="headings")
-        self.tree.pack(fill=tk.BOTH, expand=True)
-
-        # Buttons
-        btn_frame = tk.Frame(self.frame_main)
-        btn_frame.pack(pady=5)
-        tk.Button(btn_frame, text="Add Row", command=self.add_row).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Delete Row", command=self.delete_row).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Edit Row", command=self.edit_row).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="View Related Tables", command=self.view_related).pack(side=tk.LEFT, padx=5)
-
-    def load_relations(self):
-        """Load relations.csv safely and normalize columns"""
-        if not os.path.exists(RELATION_FILE):
-            messagebox.showwarning("Warning", "relations.csv not found!")
-            self.relations = pd.DataFrame(columns=[
-                "ParentTable", "ParentColumn", "ReferencedTable", "ReferencedColumn"
-            ])
-            return
-
-        try:
-            # Read CSV with correct encoding and stripping quotes
-            df = pd.read_csv(
-                RELATION_FILE,
-                encoding="utf-8-sig",
-                quotechar='"',
-                sep=",",
-                skipinitialspace=True
-            )
-
-            # Clean column names
-            df.columns = [c.strip().replace('"', '') for c in df.columns]
-
-            # Verify expected columns exist
-            required = {"ParentTable", "ParentColumn", "ReferencedTable", "ReferencedColumn"}
-            missing = required - set(df.columns)
-            if missing:
-                raise Exception(f"Missing columns in relations file: {missing}")
-
-            self.relations = df
-            print("✅ Relations loaded successfully:")
-            print(self.relations.head())
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load relations file:\n{e}")
-            self.relations = pd.DataFrame(columns=[
-                "ParentTable", "ParentColumn", "ReferencedTable", "ReferencedColumn"
-            ])
-
-
-    def load_tables(self):
-        """Load all CSVs from the data folder"""
-        if not os.path.exists(DATA_FOLDER):
-            messagebox.showwarning("Warning", f"No data folder '{DATA_FOLDER}' found!")
-            return
-
-        for file in os.listdir(DATA_FOLDER):
-            if file.endswith(".csv"):
-                table_name = file[:-4]
-                path = os.path.join(DATA_FOLDER, file)
-                try:
-                    self.tables[table_name] = pd.read_csv(path)
-                    self.table_listbox.insert(tk.END, table_name)
-                except Exception as e:
-                    print(f"Error loading {file}: {e}")
-
-    def load_table_data(self, event):
-        selection = self.table_listbox.curselection()
-        if not selection:
-            return
-        table_name = self.table_listbox.get(selection[0])
-        self.current_table = table_name
-        self.current_df = self.tables[table_name]
-        self.show_table()
-
-    def show_table(self):
-        for col in self.tree.get_children():
-            self.tree.delete(col)
-        self.tree.delete(*self.tree.get_children())
-        self.tree["columns"] = list(self.current_df.columns)
-        for col in self.current_df.columns:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=150)
-        for _, row in self.current_df.iterrows():
-            self.tree.insert("", tk.END, values=list(row))
-        self.label_table.config(text=f"Table: {self.current_table}")
-
-    def add_row(self):
-        self.edit_window(new=True)
-
-    def delete_row(self):
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showinfo("Info", "Select a row first.")
-            return
-        idx = self.tree.index(selected[0])
-        self.current_df.drop(self.current_df.index[idx], inplace=True)
-        self.show_table()
-
-    def edit_row(self):
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showinfo("Info", "Select a row first.")
-            return
-        idx = self.tree.index(selected[0])
-        row_data = self.current_df.iloc[idx].to_dict()
-        self.edit_window(row_data=row_data, idx=idx, new=False)
-
-    def edit_window(self, row_data=None, idx=None, new=False):
-        win = tk.Toplevel(self)
-        win.title("Edit Row")
-        entries = {}
-        for i, col in enumerate(self.current_df.columns):
-            tk.Label(win, text=col).grid(row=i, column=0, padx=5, pady=2)
-            val = "" if new else str(row_data[col])
-            e = tk.Entry(win)
-            e.grid(row=i, column=1, padx=5, pady=2)
-            e.insert(0, val)
-            entries[col] = e
-
-        def save():
-            new_row = {c: e.get() for c, e in entries.items()}
-            if new:
-                self.current_df = pd.concat([self.current_df, pd.DataFrame([new_row])], ignore_index=True)
+    def _load_relations(self):
+        if not os.path.exists(self.relation_file):
+            raise FileNotFoundError("relations.csv not found")
+        rel = pd.read_csv(self.relation_file, dtype=str, keep_default_na=False)
+        expected = ["ForeignKeyName","ParentTable","ParentColumn","ReferencedTable","ReferencedColumn"]
+        colmap = {}
+        for e in expected:
+            for c in rel.columns:
+                if c.strip().lower() == e.lower():
+                    colmap[e] = c; break
             else:
-                for c, v in new_row.items():
-                    self.current_df.at[idx, c] = v
-            self.show_table()
-            win.destroy()
+                raise ValueError(f"relations.csv missing column: {e}")
+        rel = rel[[colmap[e] for e in expected]].copy(); rel.columns = expected
+        rel["Parent_norm"] = rel["ParentTable"].apply(normalize_table_name)
+        rel["Referenced_norm"] = rel["ReferencedTable"].apply(normalize_table_name)
+        self.relations = rel
+        for _, r in rel.iterrows():
+            self.child_map[r["Referenced_norm"]].append({
+                "ForeignKeyName": r["ForeignKeyName"],
+                "ParentTable": r["ParentTable"],
+                "Parent_norm": r["Parent_norm"],
+                "ParentColumn": r["ParentColumn"],
+                "ReferencedTable": r["ReferencedTable"],
+                "Referenced_norm": r["Referenced_norm"],
+                "ReferencedColumn": r["ReferencedColumn"],
+            })
 
-        tk.Button(win, text="Save", command=save, bg="#d4edda").grid(row=len(entries), columnspan=2, pady=10)
+    def _find_csv_for_norm(self, norm):
+        files = [f for f in os.listdir(self.data_folder) if f.lower().endswith('.csv')]
+        for f in files:
+            base = os.path.splitext(f)[0]
+            if normalize_table_name(base).lower() == norm.lower():
+                return os.path.join(self.data_folder, f)
+        return None
 
-    def view_related(self):
-        """Show tables related to the current one"""
-        if self.current_table is None:
-            messagebox.showinfo("Info", "Select a table first.")
+    def get_table_path(self, norm):
+        return self.tables.get(norm, (None, None))[1]
+
+    def _load_device_and_children(self):
+        root_norm = normalize_table_name(self.root_table)
+        needed = {root_norm}
+        for child in self.child_map.get(root_norm, []):
+            needed.add(child['Parent_norm'])
+        for norm in needed:
+            path = self._find_csv_for_norm(norm)
+            if not path:
+                print(f"[WARN] CSV for {norm} not found in {self.data_folder}; skipping.")
+                continue
+            try:
+                df = pd.read_csv(path, dtype=object, keep_default_na=False)
+            except Exception:
+                df = pd.read_csv(path, dtype=object, encoding='utf-8', errors='replace', keep_default_na=False)
+            df.columns = [str(c) for c in df.columns]
+            df = df.reset_index(drop=True)
+            self.tables[norm] = (df, path)
+
+    def detect_defaults(self):
+        defaults = {}
+        for norm, (df, _) in self.tables.items():
+            col_defaults = {}
+            for c in df.columns:
+                vals = [('' if x is None else str(x)).strip() for x in df[c].tolist()]
+                unique = sorted(set(vals))
+                if len(unique) == 1:
+                    col_defaults[c] = unique[0]
+                else:
+                    col_defaults[c] = None
+            defaults[norm] = col_defaults
+        return defaults
+
+    def compute_next_numeric_pk(self, norm):
+        if norm not in self.tables: return None
+        df, _ = self.tables[norm]
+        if df.shape[1] == 0: return None
+        pk = df.columns[0]
+        try:
+            nums = pd.to_numeric(df[pk], errors='coerce')
+            if nums.dropna().empty: return None
+            return int(nums.max()) + 1
+        except:
+            return None
+
+# ----- Application UI -----
+class DeviceBulkApp(tk.Tk):
+    def __init__(self, schema: DeviceSchema):
+        super().__init__()
+        self.schema = schema
+        self.root_norm = normalize_table_name(schema.root_table)
+        if self.root_norm not in self.schema.tables:
+            messagebox.showerror("Error", f"Device CSV not found in {schema.data_folder}")
+            self.destroy(); return
+        self.detected_defaults = self.schema.detect_defaults()
+        self.user_defaults = self._load_user_defaults()
+        self.visibility = self._load_visibility()
+        self.default_child_rows = self._load_default_child_rows()
+        self._build_ui()
+
+    def _load_user_defaults(self):
+        if os.path.exists(DEFAULTS_FILE):
+            try:
+                with open(DEFAULTS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def _load_visibility(self):
+        if os.path.exists(VISIBILITY_FILE):
+            try:
+                with open(VISIBILITY_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def _load_default_child_rows(self):
+        if os.path.exists(DEFAULT_CHILD_ROWS_FILE):
+            try:
+                with open(DEFAULT_CHILD_ROWS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def _save_default_child_rows(self):
+        try:
+            with open(DEFAULT_CHILD_ROWS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.default_child_rows, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            messagebox.showerror("Save error", str(e))
+
+    def _build_ui(self):
+        self.title("Device bulk manager")
+        self.geometry('900x700')
+        top = ttk.Frame(self); top.pack(fill='x', padx=6, pady=6)
+        ttk.Button(top, text='Bulk Insert (Excel)', command=self.bulk_insert_dialog).pack(side='left', padx=6)
+        ttk.Button(top, text='Bulk Update (Excel)', command=self.bulk_update_dialog).pack(side='left', padx=6)
+        ttk.Button(top, text='Bulk Delete (Excel)', command=self.bulk_delete_dialog).pack(side='left', padx=6)
+        ttk.Button(top, text='Manage default child rows', command=self._manage_default_child_rows).pack(side='left', padx=6)
+        ttk.Button(top, text='Show/Hide fields', command=self._open_visibility_editor).pack(side='right', padx=6)
+        ttk.Button(top, text='Edit defaults', command=self._open_defaults_editor).pack(side='right', padx=6)
+        info = ttk.Label(self, text='Make a backup of CSVs before running bulk operations!')
+        info.pack(fill='x', padx=6)
+
+        # small status area
+        self.status = tk.StringVar(value='Ready')
+        ttk.Label(self, textvariable=self.status).pack(fill='x', padx=6, pady=(6,0))
+
+    # ---------- Bulk operations ----------
+    def bulk_insert_dialog(self):
+        path = filedialog.askopenfilename(title='Select Excel for bulk insert', filetypes=[('Excel', '*.xlsx;*.xls')])
+        if not path: return
+        try:
+            df = pd.read_excel(path, dtype=object)
+        except Exception as e:
+            messagebox.showerror('Read error', f'Failed to read Excel: {e}'); return
+        self.status.set(f'Bulk insert: {len(df)} rows from {os.path.basename(path)}')
+        self.bulk_insert_from_df(df)
+
+    def bulk_update_dialog(self):
+        path = filedialog.askopenfilename(title='Select Excel for bulk update', filetypes=[('Excel', '*.xlsx;*.xls')])
+        if not path: return
+        try:
+            df = pd.read_excel(path, dtype=object)
+        except Exception as e:
+            messagebox.showerror('Read error', f'Failed to read Excel: {e}'); return
+        self.status.set(f'Bulk update: {len(df)} rows from {os.path.basename(path)}')
+        self.bulk_update_from_df(df)
+
+    def bulk_delete_dialog(self):
+        path = filedialog.askopenfilename(title='Select Excel for bulk delete (device PK list expected)', filetypes=[('Excel', '*.xlsx;*.xls')])
+        if not path: return
+        try:
+            df = pd.read_excel(path, dtype=object)
+        except Exception as e:
+            messagebox.showerror('Read error', f'Failed to read Excel: {e}'); return
+        self.status.set(f'Bulk delete: {len(df)} rows from {os.path.basename(path)}')
+        self.bulk_delete_from_df(df)
+
+    def _col_to_table_col(self, colname):
+        # if col contains dot: Table.Col, else Device.Col
+        if '.' in colname:
+            t, c = colname.split('.', 1)
+            return normalize_table_name(t), c
+        return self.root_norm, colname
+
+    def bulk_insert_from_df(self, exdf: pd.DataFrame):
+        # map each row to device row + child rows
+        device_df, device_path = self.schema.tables[self.root_norm]
+        new_devices = []
+        child_inserts = defaultdict(list)
+        for _, r in exdf.iterrows():
+            # build device row initial with defaults
+            dev_row = {}
+            # start with user defaults and detected
+            for c in device_df.columns:
+                ud = self.user_defaults.get(self.root_norm, {}).get(c, None)
+                det = self.detected_defaults.get(self.root_norm, {}).get(c, None)
+                dev_row[c] = '' if ud is None and det is None else (ud if ud is not None else det)
+            # override with Excel columns mapped to Device
+            for col in exdf.columns:
+                tnorm, cname = self._col_to_table_col(col)
+                val = r[col]
+                if pd.isna(val):
+                    continue
+                if tnorm == self.root_norm:
+                    if cname in dev_row:
+                        dev_row[cname] = str(val)
+                else:
+                    # child column -> collect into temporary child dict keyed by table
+                    child_inserts[tnorm].append((dev_row, {cname: str(val)}))
+            # also plan default child rows that should be created for every device
+            for ctn, templates in self.default_child_rows.items():
+                for tmpl in templates:
+                    # copy template (strings)
+                    child_inserts[ctn].append((dev_row, dict(tmpl)))
+            new_devices.append(dev_row)
+
+        # append devices sequentially and write CSV incrementally (keeps memory small)
+        if not new_devices:
+            messagebox.showinfo('Bulk insert', 'No devices found in Excel.')
             return
+        # Build new device DF (append)
+        appended = pd.concat([device_df, pd.DataFrame(new_devices)], ignore_index=True)
+        try:
+            safe_write_csv(appended, device_path)
+        except Exception as e:
+            messagebox.showerror('Write error', f'Failed to write Device CSV: {e}'); return
+        # For child inserts, we must compute FK value for each child row using referenced column or pk.
+        # reload device df to get final state (including newly appended devices)
+        self.schema._load_device_and_children()
+        device_df2, _ = self.schema.tables[self.root_norm]
+        # naive approach: assume excel rows appended in same order to device_df2 tail
+        start_idx = len(device_df)
+        for i, dev_row in enumerate(new_devices):
+            device_pk = None
+            pk_col = device_df.columns[0]
+            # determine device_pk value from appended frame
+            try:
+                device_pk = str(device_df2.iloc[start_idx + i][pk_col])
+            except Exception:
+                device_pk = ''
+            # apply child inserts that referenced this particular dev_row
+            # child_inserts stored tuples (dev_row_ref, partial_row), we match by object identity -- not robust when copy
+            # simpler: also add per-new-device child templates stored earlier in order. We'll instead handle default child rows by templates only here.
+            pass
+        # For simplicity: re-open all child tables and append templates linked to each new device
+        for ctn, templates in self.default_child_rows.items():
+            if ctn not in self.schema.tables:
+                continue
+            child_df, child_path = self.schema.tables[ctn]
+            rows_to_add = []
+            pk_col_child = child_df.columns[0] if child_df.shape[1]>0 else None
+            for j in range(len(new_devices)):
+                # corresponding appended device row
+                try:
+                    device_pk = str(device_df2.iloc[start_idx + j][device_df.columns[0]])
+                except Exception:
+                    device_pk = ''
+                for tmpl in templates:
+                    rdict = dict(tmpl)
+                    # ensure FK set to device_pk if parentcol exists in template key names
+                    # find relation meta
+                    meta_list = [m for m in self.schema.child_map.get(self.root_norm, []) if m['Parent_norm']==ctn]
+                    parent_col = meta_list[0]['ParentColumn'] if meta_list else None
+                    if parent_col:
+                        rdict[parent_col] = device_pk
+                    # child pk auto assign
+                    if pk_col_child and (rdict.get(pk_col_child, '') == ''):
+                        try:
+                            existing = pd.to_numeric(child_df[pk_col_child], errors='coerce')
+                            maxv = existing.max()
+                            if not pd.isna(maxv): rdict[pk_col_child] = int(maxv)+1
+                            else: rdict[pk_col_child] = ''
+                        except:
+                            rdict[pk_col_child] = ''
+                    rows_to_add.append(rdict)
+            if rows_to_add:
+                new_child_df = pd.concat([child_df, pd.DataFrame(rows_to_add)], ignore_index=True)
+                try:
+                    safe_write_csv(new_child_df, child_path)
+                except Exception as e:
+                    messagebox.showerror('Write error', f'Failed to write child table {ctn}: {e}'); return
+        messagebox.showinfo('Bulk insert', f'Inserted {len(new_devices)} devices and default child rows.')
+        self.schema._load_device_and_children()
 
-        rels = self.relations[self.relations["ParentTable"].astype(str).str.lower() == self.current_table.lower()]
-        if rels.empty:
-            messagebox.showinfo("Info", f"No related tables found for {self.current_table}.")
-            return
+    def bulk_update_from_df(self, exdf: pd.DataFrame):
+        # update Device rows and optionally child rows if identifying PK is provided
+        device_df, device_path = self.schema.tables[self.root_norm]
+        pk = device_df.columns[0]
+        updated_count = 0
+        device_df2 = device_df.copy()
+        # columns with dot syntax map to child tables; track child updates grouped by table
+        child_updates = defaultdict(list)
+        for _, r in exdf.iterrows():
+            # device pk value expected either as column named pk or as Device.pk
+            if pk in exdf.columns:
+                dev_pk_val = r[pk]
+            elif f'{self.root_norm}.{pk}' in exdf.columns:
+                dev_pk_val = r[f'{self.root_norm}.{pk}']
+            else:
+                messagebox.showwarning('Missing PK', f'Excel must contain Device PK column named "{pk}" for updates. Row skipped.'); continue
+            if pd.isna(dev_pk_val):
+                continue
+            dev_pk_val = str(dev_pk_val)
+            # locate device row by pk
+            matches = device_df2[device_df2[pk].astype(str) == dev_pk_val]
+            if matches.empty:
+                continue
+            idx = matches.index[0]
+            changed = False
+            for col in exdf.columns:
+                tnorm, cname = self._col_to_table_col(col)
+                val = r[col]
+                if pd.isna(val):
+                    continue
+                val = str(val)
+                if tnorm == self.root_norm:
+                    # update device_df2 at idx
+                    old = '' if pd.isna(device_df2.at[idx, cname]) else str(device_df2.at[idx, cname])
+                    if old != val:
+                        device_df2.at[idx, cname] = val; changed = True
+                else:
+                    # child update: require child pk to be present as column Table.ChildPK
+                    child_updates[tnorm].append((dev_pk_val, cname, val, r))
+            if changed:
+                updated_count += 1
+        # write device CSV if any updates
+        if updated_count > 0:
+            try:
+                safe_write_csv(device_df2, device_path)
+            except Exception as e:
+                messagebox.showerror('Write error', f'Failed to write Device CSV: {e}'); return
+        # process child updates: we expect exdf to include child PK column to map
+        child_written = 0
+        for ctn, updates in child_updates.items():
+            if ctn not in self.schema.tables: continue
+            child_df, child_path = self.schema.tables[ctn]
+            child_df2 = child_df.copy()
+            child_pk_col = child_df.columns[0] if child_df.shape[1]>0 else None
+            # naive approach: if update rows contain child's PK column in excel, perform per-row update
+            # otherwise skip child updates
+            # gather unique child pk columns referenced
+            # assume updates entries may include tuple with cname equals child PK column
+            # More robust implementation would require structured Excel design; we'll try simple support
+            for (dev_pk_val, cname, val, original_row) in updates:
+                # look for child pk in original_row as Table.ChildPK or ChildPK
+                child_pk_val = None
+                candidate1 = f'{ctn}.{child_pk_col}' if child_pk_col else None
+                if candidate1 and candidate1 in exdf.columns:
+                    child_pk_val = original_row[candidate1]
+                elif child_pk_col and child_pk_col in exdf.columns:
+                    child_pk_val = original_row[child_pk_col]
+                if pd.isna(child_pk_val) or child_pk_val is None:
+                    continue
+                child_pk_val = str(child_pk_val)
+                # locate row in child_df2
+                match = child_df2[child_df2[child_pk_col].astype(str) == child_pk_val]
+                if match.empty:
+                    continue
+                cidx = match.index[0]
+                old = '' if pd.isna(child_df2.at[cidx, cname]) else str(child_df2.at[cidx, cname])
+                if old != val:
+                    child_df2.at[cidx, cname] = val
+                    child_written += 1
+            if child_written > 0:
+                try:
+                    safe_write_csv(child_df2, child_path)
+                except Exception as e:
+                    messagebox.showerror('Write error', f'Failed to write child table {ctn}: {e}'); return
+        messagebox.showinfo('Bulk update', f'Device rows updated: {updated_count}. Child cells updated (approx): {child_written}.')
+        self.schema._load_device_and_children()
 
-        win = tk.Toplevel(self)
-        win.title(f"Related Tables for {self.current_table}")
-        win.geometry("800x400")
+    def bulk_delete_from_df(self, exdf: pd.DataFrame):
+        # expects a column equal to device PK name or Device.PK
+        device_df, device_path = self.schema.tables[self.root_norm]
+        pk = device_df.columns[0]
+        # find column
+        if pk in exdf.columns:
+            keys = exdf[pk].dropna().astype(str).tolist()
+        elif f'{self.root_norm}.{pk}' in exdf.columns:
+            keys = exdf[f'{self.root_norm}.{pk}'].dropna().astype(str).tolist()
+        else:
+            messagebox.showerror('Missing PK', f'Excel must contain primary key column named "{pk}" or "{self.root_norm}.{pk}"'); return
+        if not keys:
+            messagebox.showinfo('Bulk delete', 'No keys found in Excel.'); return
+        # delete from device df
+        df2 = device_df[~device_df[pk].astype(str).isin(keys)].reset_index(drop=True)
+        try:
+            safe_write_csv(df2, device_path)
+        except Exception as e:
+            messagebox.showerror('Write error', f'Failed to write Device CSV: {e}'); return
+        # cascade: remove child rows whose FK equals any deleted pk
+        deleted_children = []
+        for cnorm, (child_df, child_path) in list(self.schema.tables.items()):
+            if cnorm == self.root_norm: continue
+            # find relation meta where parent is root_norm and parent_norm==cnorm
+            meta_list = [m for m in self.schema.child_map.get(self.root_norm, []) if m['Parent_norm']==cnorm]
+            if not meta_list: continue
+            parent_col = meta_list[0]['ParentColumn']
+            cnew = child_df[~child_df[parent_col].astype(str).isin(keys)].reset_index(drop=True)
+            try:
+                safe_write_csv(cnew, child_path)
+                deleted_children.append(cnorm)
+            except Exception as e:
+                messagebox.showerror('Write error', f'Failed to write child table {cnorm}: {e}'); return
+        messagebox.showinfo('Bulk delete', f'Deleted {len(keys)} devices. Cleaned child tables: {", ".join(deleted_children)}')
+        self.schema._load_device_and_children()
 
-        tree = ttk.Treeview(win, columns=["ParentColumn", "ReferencedTable", "ReferencedColumn"], show="headings")
-        tree.pack(fill=tk.BOTH, expand=True)
-        for col in ["ParentColumn", "ReferencedTable", "ReferencedColumn"]:
-            tree.heading(col, text=col)
-            tree.column(col, width=200)
-        for _, row in rels.iterrows():
-            tree.insert("", tk.END, values=[row["ParentColumn"], row["ReferencedTable"], row["ReferencedColumn"]])
+    # ---------- default child rows manager ----------
+    def _manage_default_child_rows(self):
+        dialog = DefaultChildRowsDialog(self, 'Manage default child rows', list(self.schema.tables.keys()), self.default_child_rows)
+        if dialog.ok:
+            self.default_child_rows = dialog.result
+            self._save_default_child_rows()
+            messagebox.showinfo('Defaults', 'Default child row templates saved.')
 
-    def save_changes(self):
-        for name, df in self.tables.items():
-            df.to_csv(os.path.join(DATA_FOLDER, f"{name}.csv"), index=False)
-        messagebox.showinfo("Saved", "All CSV files updated successfully!")
+    # ---------- UI helpers (visibility, defaults) ----------
+    def _open_visibility_editor(self):
+        dialog = VisibilityDialog(self, 'Show/Hide fields + tables', list(self.schema.tables.keys()), self.schema, self.visibility)
+        if dialog.ok:
+            self.visibility = dialog.result
+            with open(VISIBILITY_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.visibility, f, indent=2, ensure_ascii=False)
+            messagebox.showinfo('Visibility', 'Saved.')
 
-    def reload_data(self):
-        self.tables.clear()
-        self.table_listbox.delete(0, tk.END)
-        self.load_tables()
-        messagebox.showinfo("Reloaded", "Data reloaded successfully.")
+    def _open_defaults_editor(self):
+        dialog = DefaultsEditor(self, 'Edit defaults', self.detected_defaults, self.user_defaults)
+        if dialog.ok:
+            self.user_defaults = dialog.result
+            with open(DEFAULTS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.user_defaults, f, indent=2, ensure_ascii=False)
+            messagebox.showinfo('Defaults', 'Saved.')
 
-if __name__ == "__main__":
-    app = DatabaseViewer()
+# ---------- Dialogs (Defaults, Visibility, DefaultChildRows) ----------
+class DefaultsEditor(tk.Toplevel):
+    def __init__(self, parent, title, detected_defaults, user_defaults):
+        super().__init__(parent); self.transient(parent); self.title(title); self.parent = parent
+        self.result = {}; self.ok = False
+        body = ttk.Frame(self); body.pack(padx=12, pady=12, fill='both', expand=True)
+        canvas = tk.Canvas(body, height=520); vs = ttk.Scrollbar(body, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=vs.set); vs.pack(side='right', fill='y'); canvas.pack(side='left', fill='both', expand=True)
+        inner = ttk.Frame(canvas); canvas.create_window((0,0), window=inner, anchor='nw')
+        def on_conf(e): canvas.configure(scrollregion=canvas.bbox('all'))
+        inner.bind('<Configure>', on_conf)
+        self.entries = {}; row = 0
+        for table, cols in detected_defaults.items():
+            ttk.Label(inner, text=f'Table: {table}', font=('Segoe UI', 10, 'bold')).grid(row=row, column=0, sticky='w', pady=(8,4), padx=6); row+=1
+            for col, det in cols.items():
+                ttk.Label(inner, text=human_label(col)).grid(row=row, column=0, sticky='w', padx=6, pady=3)
+                ent = ttk.Entry(inner, width=60); ent.grid(row=row, column=1, padx=6, pady=3)
+                val = user_defaults.get(table, {}).get(col, det if det is not None else '')
+                ent.insert(0, '' if val is None else str(val))
+                self.entries.setdefault(table, {})[col] = ent
+                row += 1
+        btns = ttk.Frame(self); btns.pack(fill='x', pady=8)
+        ttk.Button(btns, text='OK', command=self.on_ok).pack(side='right', padx=6)
+        ttk.Button(btns, text='Cancel', command=self.on_cancel).pack(side='right')
+        self.grab_set(); self.wait_window(self)
+    def on_ok(self):
+        res = {}
+        for table, colmap in self.entries.items():
+            res[table] = {}
+            for col, ent in colmap.items():
+                v = ent.get().strip()
+                if v != '': res[table][col] = v
+        self.result = res; self.ok = True; self.destroy()
+    def on_cancel(self):
+        self.ok = False; self.destroy()
+
+class VisibilityDialog(tk.Toplevel):
+    def __init__(self, parent, title, table_list, schema: DeviceSchema, current_visibility):
+        super().__init__(parent); self.transient(parent); self.title(title); self.parent = parent
+        self.result = {}; self.ok = False; self.vars = {}
+        body = ttk.Frame(self); body.pack(padx=12, pady=12, fill='both', expand=True)
+        canvas = tk.Canvas(body, height=520); vs = ttk.Scrollbar(body, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=vs.set); vs.pack(side='right', fill='y'); canvas.pack(side='left', fill='both', expand=True)
+        inner = ttk.Frame(canvas); canvas.create_window((0,0), window=inner, anchor='nw')
+        def on_conf(e): canvas.configure(scrollregion=canvas.bbox('all'))
+        inner.bind('<Configure>', on_conf)
+        row = 0
+        for table in table_list:
+            df, _ = schema.tables.get(table, (None, None))
+            if df is None: continue
+            # table-level toggle
+            tvar = tk.BooleanVar(value=current_visibility.get(table, {}).get('__table_visible', True))
+            cb = ttk.Checkbutton(inner, text=f'Table: {table}', variable=tvar)
+            cb.grid(row=row, column=0, sticky='w', pady=(8,4), padx=6)
+            self.vars.setdefault(table, {})['__table_visible'] = tvar
+            row += 1
+            for col in df.columns:
+                var = tk.BooleanVar(value=current_visibility.get(table, {}).get(col, True))
+                cb2 = ttk.Checkbutton(inner, text=human_label(col), variable=var)
+                cb2.grid(row=row, column=0, sticky='w', padx=12)
+                self.vars[table][col] = var
+                row += 1
+        btns = ttk.Frame(self); btns.pack(fill='x', pady=8)
+        ttk.Button(btns, text='OK', command=self.on_ok).pack(side='right', padx=6)
+        ttk.Button(btns, text='Cancel', command=self.on_cancel).pack(side='right')
+        self.grab_set(); self.wait_window(self)
+    def on_ok(self):
+        res = {}
+        for table, cmap in self.vars.items():
+            res[table] = {}
+            for col, var in cmap.items():
+                res[table][col] = bool(var.get())
+        self.result = res; self.ok = True; self.destroy()
+    def on_cancel(self):
+        self.ok = False; self.destroy()
+
+class DefaultChildRowsDialog(tk.Toplevel):
+    """Simple dialog to add/edit default child row templates."""
+    def __init__(self, parent, title, tables, current_templates):
+        super().__init__(parent); self.transient(parent); self.title(title); self.parent = parent
+        self.result = {}; self.ok = False
+        body = ttk.Frame(self); body.pack(padx=12, pady=12, fill='both', expand=True)
+        canvas = tk.Canvas(body, height=520); vs = ttk.Scrollbar(body, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=vs.set); vs.pack(side='right', fill='y'); canvas.pack(side='left', fill='both', expand=True)
+        inner = ttk.Frame(canvas); canvas.create_window((0,0), window=inner, anchor='nw')
+        def on_conf(e): canvas.configure(scrollregion=canvas.bbox('all'))
+        inner.bind('<Configure>', on_conf)
+        self.editors = {}
+        row = 0
+        for t in tables:
+            df, _ = parent.schema.tables.get(t, (None, None))
+            if df is None: continue
+            ttk.Label(inner, text=f'Table: {t}', font=('Segoe UI', 10, 'bold')).grid(row=row, column=0, sticky='w', pady=(8,4), padx=6); row+=1
+            # show existing templates as JSON text (simple UX)
+            txt = tk.Text(inner, height=4, width=80)
+            cur = current_templates.get(t, [])
+            txt.insert('1.0', json.dumps(cur, indent=2, ensure_ascii=False))
+            txt.grid(row=row, column=0, padx=6, pady=4)
+            self.editors[t] = txt
+            row += 1
+        btns = ttk.Frame(self); btns.pack(fill='x', pady=8)
+        ttk.Button(btns, text='OK', command=self.on_ok).pack(side='right', padx=6)
+        ttk.Button(btns, text='Cancel', command=self.on_cancel).pack(side='right')
+        self.grab_set(); self.wait_window(self)
+    def on_ok(self):
+        res = {}
+        try:
+            for t, txt in self.editors.items():
+                raw = txt.get('1.0', 'end').strip()
+                if raw:
+                    parsed = json.loads(raw)
+                    res[t] = parsed
+            self.result = res; self.ok = True; self.destroy()
+        except Exception as e:
+            messagebox.showerror('Parse error', f'Failed to parse JSON: {e}')
+    def on_cancel(self):
+        self.ok = False; self.destroy()
+
+# ---------- run ----------
+def main():
+    if not os.path.exists(DATA_FOLDER):
+        print('Data folder not found:', DATA_FOLDER); return
+    if not os.path.exists(RELATION_FILE):
+        print('relations.csv not found:', RELATION_FILE); return
+    schema = DeviceSchema(DATA_FOLDER, RELATION_FILE, root_table=ROOT_TABLE)
+    app = DeviceBulkApp(schema)
     app.mainloop()
+
+if __name__ == '__main__':
+    main()
